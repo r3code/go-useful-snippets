@@ -1,9 +1,10 @@
-package dbutils_test
+package transactor_test
 
 import (
+	"github.com/r3code/go-useful-snippets/dbutils/transactor"
 	"flag"
 	"fmt"
-	"go-useful-snippets/dbutils"
+	
 	"os"
 	"testing"
 	"time"
@@ -80,21 +81,20 @@ func MustMigrateDB(db *sqlx.DB) {
 	
 	ALTER TABLE public.wtt
 		OWNER to postgres;`)
-	println("MustMigrateDB")
 }
 
 func TestWithTransaction_MustSuccess(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skip integration test")
 	}
-	okFunc := func(tx dbutils.TransactionX) error {
+	okFunc := func(tx transactor.TransactionX) error {
 		rows, err := tx.Queryx("SELECT * from public.wtt")
 		defer rows.Close()
 		return err // ошибки быть не должно
 	}
-	err := dbutils.WithTransaction(MustGetTestConnection(), okFunc)
+	err := transactor.WithTransaction(MustGetTestConnection(), okFunc)
 	if err != nil {
-		t.Errorf("WithTransaction() error = %v, wantErr nil", err)
+		t.Error("Error returned istead of return `nil`", err)
 	}
 }
 
@@ -102,19 +102,19 @@ func TestWithTransaction_PanicMustRollback(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skip integration test")
 	}
-	panicFunc := func(tx dbutils.TransactionX) error {
+	panicFunc := func(tx transactor.TransactionX) error {
 		tx.MustExec("INSERT INTO public.wtt VALUES('test_panic')")
 		panic("test panic")
 	}
 	db := MustGetTestConnection()
-	err := dbutils.WithTransaction(db, panicFunc)
+	err := transactor.WithTransaction(db, panicFunc)
 	count := -1
 	db.Get(&count, "SELECT count(*) FROM public.wtt WHERE 'name' = 'test_panic'")
 	if count != 0 {
-		t.Error("WithTransaction() did not rollback after panic")
+		t.Error("No rollback happened after panic")
 	}
 	if err == nil {
-		t.Error("WithTransaction() did not raise the error after panic", err)
+		t.Error("No error raised after panic", err)
 	}
 }
 
@@ -122,20 +122,22 @@ func TestWithTransaction_TxFuncErrMustRollback(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skip integration test")
 	}
-	testError := errors.New("txFunc test error")
-	errorringFunc := func(tx dbutils.TransactionX) error {
+	funcError := errors.New("@txFunc test error@")
+
+	errorringFunc := func(tx transactor.TransactionX) error {
 		tx.MustExec("INSERT INTO public.wtt VALUES('test_error')")
-		return testError
+		return funcError
 	}
 	db := MustGetTestConnection()
-	err := dbutils.WithTransaction(db, errorringFunc)
+	err := transactor.WithTransaction(db, errorringFunc)
 	count := -1
 	db.Get(&count, "SELECT count(*) FROM public.wtt WHERE 'name' = 'test_error'")
 	if count != 0 {
-		t.Error("WithTransaction() did not rollback after txFunc error")
+		t.Error("No rollback happened after txFunc error")
 	}
-	if err != testError {
-		t.Error("WithTransaction() did not raise the error on txFunc error", err)
+	orgiginErr := errors.Cause(err)
+	if orgiginErr != funcError {
+		t.Errorf("Not raised an error after txFunc error, have %v, want %v", err, funcError)
 	}
 }
 

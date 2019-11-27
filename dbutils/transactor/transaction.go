@@ -1,4 +1,4 @@
-package dbutils
+package transactor
 
 import (
 	"context"
@@ -58,7 +58,7 @@ func WithTransaction(db *sqlx.DB, txFunc TxFunc) (err error) {
 	}
 	err = execute(tx, txFunc)
 	if err != nil {
-		return errors.Annotate(err, "Wrapped in transaction 'txFunc' exec failed")
+		return err
 	}
 	return nil
 }
@@ -67,26 +67,26 @@ func execute(tx *sqlx.Tx, txFunc TxFunc) (err error) {
 	var handleErrors = func() {
 		if p := recover(); p != nil { // err = nil
 			// где-то случилась паника
-			err = multierror.Append(err, errors.Errorf("panic in WithTransaction(): %v", p))
+			err = errors.Errorf("panic in WithTransaction(): %v", p)
 			rollErr := tx.Rollback()
 			if rollErr != nil {
-				err = multierror.Append(err, errors.Annotate(rollErr, "Transaction Rollback failed"))
+				err = multierror.Append(err, errors.Annotate(rollErr, "Failed Transaction Rollback after panic"))
 			}
 			return // err заполнено
 		}
 
 		if err != nil {
-			err = multierror.Append(err, errors.Annotate(err, "txFunc execute failed"))
+			err = errors.Annotate(err, "Wrapped function exit with error")
 			rollErr := tx.Rollback()
 			if rollErr != nil {
-				err = multierror.Append(err, errors.Annotate(rollErr, "Transaction Rollback failed"))
+				err = multierror.Append(err, errors.Annotate(rollErr, "Failed Transaction Rollback after error in wrapped function"))
 			}
 			return // err заполнено
 		}
 		// Если все в проядке, то зафиксируем
 		err = tx.Commit()
 		if err != nil {
-			err = errors.Annotate(err, "Transaction Commit failed")
+			err = errors.Annotate(err, "Failed Transaction Commit")
 		}
 	}
 
